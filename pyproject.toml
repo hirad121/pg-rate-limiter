@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pg-rate-limiter"
+version = "0.1.0"
+description = "Postgres-backed, atomic, batched API rate limiter for FastAPI/SQLAlchemy apps -- no Redis required."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi~=0.124.0",
+    "sqlalchemy~=2.0.44",
+    "cachetools~=6.2.2",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg~=0.31.0"]
+test = [
+    "asyncpg~=0.31.0",
+    "aiosqlite~=0.21.0",
+    "pytest~=9.0.2",
+    "pytest-asyncio~=1.3.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["test"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "PIE"]
+ignore = [
+    # Naive datetime.utcnow() is deliberate throughout this codebase: every
+    # DateTime column here is naive (no tz), matching both SQLite and
+    # Postgres `timestamp without time zone`. Switching to tz-aware
+    # datetimes would break every comparison against those columns.
+    "DTZ",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "cachetools"
+ignore_missing_imports = true
