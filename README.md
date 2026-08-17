@@ -24,26 +24,18 @@ library batches that into one round trip, one commit, all-or-nothing.
 Extracted from a production FastAPI app's rate limiter after a database
 audit turned up two real findings on the underlying table:
 
-- **Sequence exhaustion, found while cheap.** The table's primary key was
-  `int4` (max ~2.1 billion). At this table's write rate — every
-  IP+user-limited request writes 2 rows — that's a genuine long-run risk,
-  not a hypothetical one. It was fixed while the table was still small
-  (~2,000 rows, a fast `ALTER COLUMN ... TYPE bigint` with no backfill)
-  instead of deferred to a future, higher-stakes migration. **The gotcha
-  inside that fix**: widening the *column* to bigint isn't enough on its
-  own — the auto-created sequence backing it keeps its own separate
-  `int4`-bound ceiling until you explicitly `ALTER SEQUENCE ... AS bigint`
-  too. This library ships bigint (with a SQLite-compatible variant) from
-  the start so nobody using it has to rediscover that.
-- **Concurrency, proven, not just reasoned about.** The batched upsert path
-  had only ever been exercised against SQLite, sequentially — never against
-  real Postgres, under real concurrency. A dedicated test (`test/
-  test_postgres_integration.py` in this repo) fires 8 genuinely concurrent
-  hits at the same subject and asserts the count lands at exactly 8. It
-  does.
-
-If you're running a rate limiter on top of Postgres already, both of these
-are worth checking for regardless of whether you use this library.
+- **Sequence exhaustion, found while cheap.** The primary key was `int4`
+  (max ~2.1 billion) on a table writing 2 rows per IP+user-limited
+  request — a genuine long-run risk. Fixed while the table was still
+  small. **The gotcha**: widening the *column* to bigint isn't enough —
+  the auto-created sequence keeps its own separate `int4` ceiling until
+  you also `ALTER SEQUENCE ... AS bigint`. This library ships bigint from
+  the start so nobody has to rediscover that.
+- **Concurrency, proven, not just reasoned about.** The batched upsert
+  path had only ever been tested against SQLite, sequentially — never
+  real Postgres under real concurrency. `test/test_postgres_integration.py`
+  fires 8 genuinely concurrent hits at the same subject and asserts the
+  count lands at exactly 8. It does.
 
 ## Quickstart
 
@@ -97,12 +89,15 @@ known tradeoff, not an oversight).
 
 ## Setup
 
-Create the table via your own Alembic migration (or call
-`Base.metadata.create_all` directly in a script/test):
+Create the table via your own Alembic migration, or directly:
 
 ```python
-from pg_rate_limiter import Base
-# Base.metadata has one table: rate_limit_buckets
+from sqlalchemy.ext.asyncio import create_async_engine
+from pg_rate_limiter import Base  # Base.metadata has one table: rate_limit_buckets
+
+engine = create_async_engine("postgresql+asyncpg://localhost/your_db")
+async with engine.begin() as conn:
+    await conn.run_sync(Base.metadata.create_all)
 ```
 
 Then construct one `RateLimiter` at app startup and reuse it — it holds the
@@ -113,26 +108,6 @@ limiter = RateLimiter(
     subject_secret=os.environ["RATE_LIMIT_SUBJECT_SECRET"],  # dedicated, see Security
     allow_local_fallback=False,  # True only in dev/test, see Security
 )
-```
-
-## Run it
-
-```bash
-git clone https://github.com/hirad121/pg-rate-limiter
-cd pg-rate-limiter
-pip install -e ".[test]"
-createdb pg_rate_limiter_dev
-python -c "
-import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine
-from pg_rate_limiter import Base
-
-async def main():
-    engine = create_async_engine('postgresql+asyncpg://localhost/pg_rate_limiter_dev')
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-asyncio.run(main())
-"
 ```
 
 ## Use it
@@ -235,7 +210,7 @@ coverage even if you can't run the integration test locally yourself.
 Before publishing, this was actually run — not just written and assumed to work:
 
 - **The full sqlite/mocked test suite** (`pytest test/ --ignore=test/test_postgres_integration.py`, 19 tests) passes on a fresh install, in a clean venv, with the exact pinned dependency versions in `pyproject.toml`. `ruff check` and `mypy src` are both clean too.
-- **The real-Postgres concurrency test** (`test_concurrent_hits_on_same_subject_produce_no_lost_updates`) was written specifically to reproduce the source app's own proven result (8 concurrent hits on one subject → `hit_count == 8`, no lost updates). It couldn't be run against a local Postgres instance before this repo's first push (the only local Postgres available had a superuser password this effort didn't have access to, and reading the sibling app's real `.env` to find one was correctly refused rather than worked around) — so it ran for the first time in CI on the first push instead: [run 32030240960](https://github.com/hirad121/pg-rate-limiter/actions/runs/32030240960), `postgres-integration` job, **passed**. It has since also been run locally against real Postgres (a dedicated scratch role, not the app's own credentials) and passed there too.
+- **The real-Postgres concurrency test** (`test_concurrent_hits_on_same_subject_produce_no_lost_updates`) reproduces the source app's own proven result (8 concurrent hits on one subject → `hit_count == 8`, no lost updates). Passed in CI ([run 32030240960](https://github.com/hirad121/pg-rate-limiter/actions/runs/32030240960)) and passed locally against a real Postgres instance.
 - **What wasn't independently re-verified**: sustained high-QPS load against a real deployment — the concurrency test proves correctness under concurrent access, not throughput under sustained production-scale traffic. If you're evaluating this for a high-QPS use case, benchmark it against your own workload before adopting.
 
 ## Gotchas
