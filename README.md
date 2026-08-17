@@ -37,6 +37,9 @@ audit turned up two real findings on the underlying table:
   fires 8 genuinely concurrent hits at the same subject and asserts the
   count lands at exactly 8. It does.
 
+If you're running a rate limiter on top of Postgres already, both of these
+are worth checking for regardless of whether you use this library.
+
 ## Quickstart
 
 ```bash
@@ -108,6 +111,26 @@ limiter = RateLimiter(
     subject_secret=os.environ["RATE_LIMIT_SUBJECT_SECRET"],  # dedicated, see Security
     allow_local_fallback=False,  # True only in dev/test, see Security
 )
+```
+
+## Run it
+
+```bash
+git clone https://github.com/hirad121/pg-rate-limiter
+cd pg-rate-limiter
+pip install -e ".[test]"
+createdb pg_rate_limiter_dev
+python -c "
+import asyncio
+from sqlalchemy.ext.asyncio import create_async_engine
+from pg_rate_limiter import Base
+
+async def main():
+    engine = create_async_engine('postgresql+asyncpg://localhost/pg_rate_limiter_dev')
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+asyncio.run(main())
+"
 ```
 
 ## Use it
