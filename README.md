@@ -261,3 +261,7 @@ self-contained the work is:
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Author
+
+[@hirad121](https://github.com/hirad121)
